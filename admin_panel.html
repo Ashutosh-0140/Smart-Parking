@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - SmartPark</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Leaflet CSS (For the Map) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Chart.js for Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        #adminMap { height: 350px; width: 100%; border-radius: 1rem; z-index: 0; }
+        .leaflet-control-locate { background-color: white; padding: 5px; cursor: pointer; }
+        .leaflet-pane { z-index: 0 !important; } 
+        .leaflet-control { z-index: 10 !important; }
+        /* Password Blur Effect */
+        .blur-text { filter: blur(4px); transition: 0.3s; cursor: pointer; }
+        .blur-text:hover { filter: blur(0); }
+    </style>
+</head>
+<body class="bg-slate-50 flex h-screen overflow-hidden font-sans">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-slate-900 text-white flex flex-col shrink-0">
+        <div class="p-6 text-xl font-bold flex items-center gap-2">
+            <i data-lucide="shield" class="text-blue-500"></i> Admin Panel
+        </div>
+        <nav class="flex-1 px-4 space-y-2">
+            <button onclick="location.reload()" class="w-full flex items-center gap-3 px-4 py-3 bg-blue-600 rounded-lg text-white">
+                <i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard
+            </button>
+            <div class="mt-4 px-4 text-xs text-slate-500 font-bold uppercase tracking-wider">HR & Jobs</div>
+            <button onclick="loadApplications()" class="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition text-left">
+                <i data-lucide="users" class="w-5 h-5"></i> Job Applicants
+            </button>
+            <button onclick="document.getElementById('agentModal').classList.remove('hidden')" class="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition text-left">
+                <i data-lucide="user-plus" class="w-5 h-5"></i> Add Agent Manually
+            </button>
+        </nav>
+        <div class="p-4 border-t border-slate-800">
+            <button onclick="window.location.href='index.html'" class="flex items-center gap-3 px-4 py-3 text-red-400 hover:text-red-300 w-full">
+                <i data-lucide="log-out" class="w-5 h-5"></i> Logout
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-y-auto p-8">
+        <header class="flex justify-between items-center mb-8">
+            <div>
+                <h2 class="text-2xl font-bold text-slate-800">System Overview</h2>
+                <div class="text-sm text-slate-500">Welcome, Admin</div>
+            </div>
+            <div class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2">
+                <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> System Online
+            </div>
+        </header>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="text-slate-500 text-xs font-bold uppercase mb-1">Total Revenue</div>
+                <div class="text-2xl font-bold text-emerald-600" id="totalRev">₹0.00</div>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="text-slate-500 text-xs font-bold uppercase mb-1">Active Bookings</div>
+                <div class="text-2xl font-bold text-blue-600" id="activeBookings">0</div>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="text-slate-500 text-xs font-bold uppercase mb-1">Registered Users</div>
+                <div class="text-2xl font-bold text-slate-800">156</div>
+            </div>
+            <!-- Clickable Parking Lots Card -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-md transition" onclick="showAllLots()">
+                <div class="text-slate-500 text-xs font-bold uppercase mb-1 flex items-center gap-1">
+                    Parking Lots <i data-lucide="external-link" class="w-3 h-3"></i>
+                </div>
+                <div class="text-2xl font-bold text-purple-600" id="lotCount">...</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+            <!-- Map Section -->
+            <div class="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-bold text-lg flex items-center gap-2"><i data-lucide="map" class="w-5 h-5 text-blue-500"></i> Parking Map</h3>
+                    <div class="flex gap-2">
+                        <button onclick="locateUser()" class="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded">Locate Me</button>
+                        <span class="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500 border border-slate-200">Click Map to Create Slot</span>
+                    </div>
+                </div>
+                <div id="adminMap"></div>
+            </div>
+
+            <!-- ANALYTICS -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
+                <h3 class="font-bold text-lg mb-4 text-slate-800">Traffic Distribution</h3>
+                <div class="flex-1 flex items-center justify-center"><canvas id="vehicleChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Revenue Graph -->
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8">
+            <h3 class="font-bold text-lg mb-4 text-slate-800">Weekly Revenue Trend</h3>
+            <div class="h-64">
+                <canvas id="revenueChart"></canvas>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Job Applications Modal -->
+    <div id="applicationsModal" class="fixed inset-0 bg-black/60 hidden z-[2000] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-2xl w-full max-w-4xl p-6 shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                    <i data-lucide="users" class="text-blue-600"></i> Agent Applicants
+                </h3>
+                <button onclick="document.getElementById('applicationsModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button>
+            </div>
+            <div class="overflow-hidden rounded-xl border border-slate-200">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b">
+                        <tr>
+                            <th class="p-4 font-bold text-slate-500">Name</th>
+                            <th class="p-4 font-bold text-slate-500">Email</th>
+                            <th class="p-4 font-bold text-slate-500">Applied For</th>
+                            <th class="p-4 font-bold text-slate-500 text-right">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="appTableBody" class="divide-y divide-slate-100">
+                        <tr><td colspan="4" class="p-6 text-center text-slate-400">Loading applicants...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- All Parking Lots Modal (UPDATED WITH CREDENTIALS) -->
+    <div id="allLotsModal" class="fixed inset-0 bg-black/60 hidden z-[2000] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-2xl w-full max-w-6xl p-6 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div class="flex justify-between items-center mb-6 shrink-0">
+                <h3 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                    <i data-lucide="map-pin" class="text-purple-600"></i> All Parking Zones
+                </h3>
+                <button onclick="document.getElementById('allLotsModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button>
+            </div>
+            
+            <div class="overflow-y-auto rounded-xl border border-slate-200">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-slate-50 border-b sticky top-0 z-10">
+                        <tr>
+                            <th class="p-4 font-bold text-slate-500">Slot Name</th>
+                            <th class="p-4 font-bold text-slate-500">Assigned Agent</th>
+                            <th class="p-4 font-bold text-slate-500">Agent Login (User/Pass)</th>
+                            <th class="p-4 font-bold text-slate-500">Status</th>
+                            <th class="p-4 font-bold text-slate-500 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lotsListBody" class="divide-y divide-slate-100 bg-white">
+                        <tr><td colspan="5" class="p-6 text-center text-slate-400">Loading zones...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Agent Manually Modal -->
+    <div id="agentModal" class="fixed inset-0 bg-black/50 hidden z-[2000] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+            <h3 class="text-xl font-bold text-slate-800 mb-4">Add New Agent</h3>
+            <form id="addAgentForm" class="space-y-4">
+                <input type="text" id="agentUser" placeholder="Username" class="w-full p-3 border rounded-lg" required>
+                <input type="password" id="agentPass" placeholder="Password" class="w-full p-3 border rounded-lg" required>
+                <div class="flex gap-3 mt-6">
+                    <button type="button" onclick="document.getElementById('agentModal').classList.add('hidden')" class="flex-1 py-2 text-slate-500 hover:bg-slate-50 rounded-lg">Cancel</button>
+                    <button type="submit" class="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        lucide.createIcons();
+        const map = L.map('adminMap').setView([20.5937, 78.9629], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+        let tempMarker = null;
+
+        function locateUser() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(p => {
+                    map.flyTo([p.coords.latitude, p.coords.longitude], 16);
+                    L.circleMarker([p.coords.latitude, p.coords.longitude], { radius: 8, fillColor: "#3b82f6", color: "#fff", fillOpacity: 0.8 }).addTo(map).bindPopup("You").openPopup();
+                });
+            }
+        }
+
+        async function loadLots() {
+            try {
+                const res = await fetch('api/get_lots.php');
+                const lots = await res.json();
+                document.getElementById('lotCount').innerText = lots.length || 0;
+                lots.forEach(lot => {
+                    if(lot.latitude) {
+                        let popup = `<div class="text-center"><b class="text-lg">${lot.name}</b>`;
+                        if(lot.agent_name) popup += `<div class='mt-1 text-xs bg-green-100 text-green-700 px-2 py-1 rounded inline-block'>Agent: ${lot.agent_name}</div>`;
+                        else popup += `<div class='mt-1 text-xs bg-red-100 text-red-600 px-2 py-1 rounded inline-block font-bold'>Unassigned</div>`;
+                        popup += `</div>`;
+                        L.marker([lot.latitude, lot.longitude]).addTo(map).bindPopup(popup);
+                    }
+                });
+            } catch (err) {}
+        }
+
+        async function getApplicantOptions() {
+            try {
+                const res = await fetch('api/get_applications.php');
+                const apps = await res.json();
+                if(apps.length === 0) return `<option value="">No applicants available</option>`;
+                
+                return apps.map(app => `
+                    <option value="${app.email}" data-name="${app.name}" data-id="${app.id}">
+                        ${app.name} (Applied: ${app.lot_name || 'General'})
+                    </option>
+                `).join('');
+            } catch(e) {
+                return `<option value="">Error loading applicants</option>`;
+            }
+        }
+
+        map.on('click', async function(e) {
+            if (tempMarker) map.removeLayer(tempMarker);
+            const applicantOptions = await getApplicantOptions();
+
+            tempMarker = L.marker(e.latlng).addTo(map).bindPopup(`
+                <div class="p-2 w-72">
+                    <p class="font-bold mb-3 border-b pb-2 text-slate-800">Create New Parking Slot</p>
+                    <label class="block text-xs font-bold text-slate-500 mb-1">Slot / Area Name</label>
+                    <input type="text" id="newLotName" class="border p-2 text-sm w-full mb-3 rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="e.g. Metro Station Gate 1">
+                    
+                    <div class="bg-blue-50 p-3 rounded-lg mb-3 border border-blue-100">
+                        <p class="text-xs font-bold text-blue-600 mb-2 uppercase flex items-center gap-1">
+                            <i data-lucide="user-plus" width="12"></i> Assign Agent
+                        </p>
+                        <label class="block text-xs text-slate-500 mb-1">Select from Applicants</label>
+                        <select id="selectedApplicant" class="w-full border p-2 text-xs rounded bg-white outline-none">
+                            <option value="">-- Choose Agent --</option>
+                            ${applicantOptions}
+                        </select>
+                        <div class="text-center text-xs text-slate-400 mt-2">- OR -</div>
+                        <input type="text" id="manualAgentName" class="border p-1 text-xs w-full mt-2 rounded" placeholder="Type Manual Name">
+                        <input type="email" id="manualAgentEmail" class="border p-1 text-xs w-full mt-1 rounded" placeholder="Type Manual Email">
+                    </div>
+
+                    <button onclick="saveLot(${e.latlng.lat}, ${e.latlng.lng})" class="bg-slate-900 text-white text-xs px-3 py-2.5 rounded-lg w-full font-bold hover:bg-slate-800 transition shadow-lg">
+                        Create Slot & Assign
+                    </button>
+                </div>
+            `).openPopup();
+            lucide.createIcons(); 
+        });
+
+        async function saveLot(lat, lng) {
+            const name = document.getElementById('newLotName').value;
+            const dropdown = document.getElementById('selectedApplicant');
+            
+            let agentName = document.getElementById('manualAgentName').value;
+            let agentEmail = document.getElementById('manualAgentEmail').value;
+
+            if(dropdown.value) {
+                agentEmail = dropdown.value;
+                agentName = dropdown.options[dropdown.selectedIndex].getAttribute('data-name');
+            }
+
+            if(!name) return alert("Please enter a Slot Name.");
+            
+            const payload = { name, lat, lng, agent_name: agentName, agent_email: agentEmail };
+
+            try {
+                const res = await fetch('api/add_lot.php', { method: 'POST', body: JSON.stringify(payload) });
+                if(res.ok) {
+                    alert(agentName ? `Success! Slot created and assigned to ${agentName}.` : "Success! Slot created (Vacant).");
+                    map.closePopup();
+                    loadLots();
+                    loadApplications();
+                } else alert("Error saving");
+            } catch(e) { alert("Simulated: Slot Created!"); map.closePopup(); }
+        }
+
+        async function deleteLot(id) {
+            if(!confirm("Are you sure you want to permanently delete this parking slot?")) return;
+            try {
+                const res = await fetch('api/delete_lot.php', { method: 'POST', body: JSON.stringify({ id: id }) });
+                if(res.ok) { alert("Parking slot removed."); showAllLots(); location.reload(); } 
+                else alert("Error removing slot.");
+            } catch(err) { alert("Simulated: Removed."); showAllLots(); }
+        }
+
+        async function loadApplications() {
+            const modal = document.getElementById('applicationsModal');
+            const tbody = document.getElementById('appTableBody');
+            if(event && event.type === 'click') modal.classList.remove('hidden');
+            
+            try {
+                const res = await fetch('api/get_applications.php');
+                const apps = await res.json();
+                if(apps.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-slate-400">No pending applications.</td></tr>`;
+                    return;
+                }
+                tbody.innerHTML = apps.map(app => `
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="p-4 font-bold text-slate-700">${app.name}</td>
+                        <td class="p-4 text-slate-500">${app.email}</td>
+                        <td class="p-4 text-slate-500">${app.lot_name || 'General Application'}</td>
+                        <td class="p-4 text-right"><span class="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-bold">Pending</span></td>
+                    </tr>
+                `).join('');
+            } catch(err) { tbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-red-400">Error loading data.</td></tr>`; }
+        }
+
+        // --- NEW: SHOW ALL PARKING LOTS WITH CREDENTIALS ---
+        async function showAllLots() {
+            const modal = document.getElementById('allLotsModal');
+            const tbody = document.getElementById('lotsListBody');
+            modal.classList.remove('hidden');
+            tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-400">Loading...</td></tr>';
+
+            try {
+                const res = await fetch('api/get_lots.php');
+                const lots = await res.json();
+
+                if(lots.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">No parking lots found.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = lots.map(lot => {
+                    const hasAgent = lot.agent_name && lot.login_username;
+                    return `
+                    <tr class="hover:bg-slate-50 border-b border-slate-100 last:border-0 group">
+                        <td class="p-4 font-bold text-slate-800">${lot.name}</td>
+                        <td class="p-4 text-slate-600">${lot.agent_name || '<span class="text-red-400 italic">Unassigned</span>'}</td>
+                        
+                        <!-- CREDENTIALS COLUMN -->
+                        <td class="p-4 font-mono text-xs text-slate-600">
+                            ${hasAgent ? `
+                                <div class="flex flex-col gap-1">
+                                    <span class="text-blue-600">U: ${lot.login_username}</span>
+                                    <span class="text-slate-400 blur-text" title="Hover to see password">P: ${lot.login_password}</span>
+                                </div>
+                            ` : '<span class="text-slate-300">-</span>'}
+                        </td>
+
+                        <td class="p-4">
+                            ${lot.agent_name 
+                                ? '<span class="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-bold">Active</span>' 
+                                : '<span class="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold">Vacancy</span>'}
+                        </td>
+                        <td class="p-4 text-right">
+                            <button onclick="deleteLot(${lot.id})" class="text-red-500 hover:bg-red-50 p-2 rounded-full transition flex items-center justify-center ml-auto" title="Remove Slot">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `}).join('');
+                lucide.createIcons();
+            } catch(err) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-red-400">Error loading list.</td></tr>`;
+            }
+        }
+
+        async function loadAnalytics() {
+            try {
+                const res = await fetch('api/get_analytics.php');
+                const data = await res.json();
+                document.getElementById('activeBookings').innerText = data.active_count || 0;
+                const total = data.chart_earnings.reduce((a, b) => parseFloat(a) + parseFloat(b), 0);
+                document.getElementById('totalRev').innerText = '₹' + total.toFixed(2);
+                
+                new Chart(document.getElementById('vehicleChart').getContext('2d'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['2-Wheeler', '4-Wheeler'],
+                        datasets: [{ data: data.vehicle_stats || [10, 5], backgroundColor: ['#3b82f6', '#10b981'], borderWidth: 0 }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+
+                new Chart(document.getElementById('revenueChart').getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: data.chart_dates,
+                        datasets: [{
+                            label: 'Daily Revenue (₹)',
+                            data: data.chart_earnings,
+                            borderColor: '#8b5cf6',
+                            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+                });
+
+            } catch (err) {}
+        }
+
+        document.getElementById('addAgentForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const u = document.getElementById('agentUser').value;
+            const p = document.getElementById('agentPass').value;
+            try {
+                const res = await fetch('api/add_agent.php', { method: 'POST', body: JSON.stringify({ username: u, password: p }) });
+                if(res.ok) { alert("Success"); document.getElementById('agentModal').classList.add('hidden'); }
+            } catch(e) { alert("Simulated Success"); document.getElementById('agentModal').classList.add('hidden'); }
+        });
+
+        loadLots();
+        locateUser();
+        loadAnalytics();
+    </script>
+</body>
+</html>

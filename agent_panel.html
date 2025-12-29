@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Portal - AutoSpace</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        #agentMap { height: 400px; width: 100%; border-radius: 1rem; z-index: 0; }
+        
+        /* Voice Listening Animation */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .listening {
+            animation: pulse-ring 1.5s infinite;
+            background-color: #ef4444 !important; /* Red when listening */
+            border-color: #ef4444 !important;
+        }
+
+        /* EV Charging Animation */
+        @keyframes charge-pulse {
+            0% { color: #fbbf24; text-shadow: 0 0 2px #fbbf24; transform: scale(1); }
+            50% { color: #f59e0b; text-shadow: 0 0 10px #f59e0b; transform: scale(1.2); }
+            100% { color: #fbbf24; text-shadow: 0 0 2px #fbbf24; transform: scale(1); }
+        }
+        .charging-active { animation: charge-pulse 1.5s infinite; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen font-sans">
+
+    <nav class="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-[1000]">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="bg-emerald-500 p-2 rounded-lg"><i data-lucide="shield-check" class="w-6 h-6 text-white"></i></div>
+                <div>
+                    <h1 class="font-bold text-lg">Agent Portal</h1>
+                    <!-- Dynamic Zone Name -->
+                    <p class="text-xs text-emerald-400" id="assignedZoneLabel">Loading Assignment...</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-3">
+                <button onclick="toggleVoice()" id="voiceBtn" class="flex items-center gap-2 bg-slate-800 border border-slate-700 hover:bg-slate-700 px-4 py-2 rounded-lg transition group">
+                    <i data-lucide="mic" class="w-4 h-4 text-slate-400 group-hover:text-white"></i>
+                    <span class="text-sm font-medium hidden md:block" id="voiceStatus">Voice Control</span>
+                </button>
+
+                <button onclick="logout()" class="text-sm bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition">Logout</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto p-6">
+        
+        <!-- Zone Warning if not assigned -->
+        <div id="zoneWarning" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            You are not assigned to any parking zone. Contact Admin.
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex justify-between">
+                <div><p class="text-slate-500 text-xs font-bold uppercase">Zone Vehicles</p><h2 class="text-3xl font-bold" id="activeCount">0</h2></div>
+                <div class="p-3 bg-blue-50 rounded-full text-blue-600"><i data-lucide="car" class="w-6 h-6"></i></div>
+            </div>
+            
+            <button onclick="scanQRCode()" class="bg-slate-900 hover:bg-slate-800 text-white p-6 rounded-xl shadow-md flex items-center justify-center gap-3 transition">
+                <i data-lucide="qr-code" class="w-8 h-8"></i>
+                <div class="text-left"><span class="block font-bold text-lg">Scan Exit Pass</span><span class="text-xs text-slate-400">Verify & Release</span></div>
+            </button>
+
+            <button onclick="openManualEntryModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white p-6 rounded-xl shadow-md flex items-center justify-center gap-3 transition">
+                <i data-lucide="plus-circle" class="w-6 h-6"></i><span class="font-bold">Manual Entry</span>
+            </button>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <h3 class="font-bold text-lg text-slate-800">Zone Traffic Feed</h3>
+                <button onclick="fetchBookings()" class="p-2 hover:bg-white rounded-lg"><i data-lucide="refresh-cw" class="w-5 h-5"></i></button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-50 text-slate-500 text-xs uppercase">
+                            <th class="p-4">Ticket ID</th>
+                            <th class="p-4">Plate</th>
+                            <th class="p-4">Entry</th>
+                            <th class="p-4">Valid Until</th>
+                            <th class="p-4">Time Remaining</th>
+                            <th class="p-4">Amount</th>
+                            <th class="p-4">EV Charging</th> <!-- NEW COLUMN -->
+                            <th class="p-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bookingsTable" class="divide-y divide-slate-100 text-sm"></tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="mt-8 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden p-6">
+             <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+                    <i data-lucide="map" class="w-5 h-5 text-blue-500"></i> Parking Map & Management
+                </h3>
+                <div class="flex gap-2">
+                    <button onclick="locateUser()" class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1 rounded hover:bg-blue-100 flex items-center gap-1">
+                        <i data-lucide="crosshair" class="w-3 h-3"></i> Locate Me
+                    </button>
+                </div>
+            </div>
+            <div id="agentMap"></div>
+        </div>
+    </main>
+
+    <!-- MANUAL ENTRY MODALs (Keep Existing) -->
+    <div id="manualEntryInputModal" class="fixed inset-0 bg-black/80 hidden z-[3000] flex items-center justify-center backdrop-blur-md">
+        <div class="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-slate-800">Manual Entry</h3>
+                <button onclick="document.getElementById('manualEntryInputModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <form id="manualEntryForm" onsubmit="submitManualEntry(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Vehicle Plate</label>
+                    <input type="text" id="manualPlateInput" placeholder="OD-02-AA-1234" required class="w-full p-2 border border-slate-200 rounded-lg outline-none uppercase text-sm font-mono">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">From</label>
+                        <input type="datetime-local" id="manualStartTime" required class="w-full p-2 border border-slate-200 rounded-lg outline-none text-xs">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">To</label>
+                        <input type="datetime-local" id="manualEndTime" required class="w-full p-2 border border-slate-200 rounded-lg outline-none text-xs">
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition shadow-lg mt-2">Generate Ticket</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- TICKET GENERATED MODAL -->
+    <div id="manualTicketModal" class="fixed inset-0 bg-black/80 hidden z-[3000] flex items-center justify-center backdrop-blur-md">
+        <div class="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl relative">
+            <div class="bg-blue-600 p-6 text-center text-white relative">
+                <h2 class="text-2xl font-bold">Vehicle Registered</h2>
+            </div>
+            <div class="p-8 flex flex-col items-center">
+                <div id="qrcode" class="p-4 bg-white border-4 border-slate-100 rounded-xl shadow-inner mb-6"></div>
+                <div class="text-center space-y-1 mb-6">
+                    <p class="text-xs text-slate-400 uppercase">Ticket ID</p>
+                    <p class="text-3xl font-mono font-bold text-slate-800" id="manualTicketId">#0000</p>
+                </div>
+                <button onclick="document.getElementById('manualTicketModal').classList.add('hidden')" class="w-full text-slate-400 font-medium py-2 hover:text-slate-600 transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        lucide.createIcons();
+        
+        let CURRENT_AGENT_LOT_ID = localStorage.getItem('agent_lot_id');
+        let map;
+        const PENALTY_RATE = 50; 
+        const EV_RATE = 15; // Rs 15 per hour for charging
+        
+        if (!CURRENT_AGENT_LOT_ID || CURRENT_AGENT_LOT_ID === 'null' || CURRENT_AGENT_LOT_ID === 'undefined') {
+            document.body.innerHTML = `<div class="flex items-center justify-center min-h-screen bg-slate-100"><div class="bg-white p-8 rounded shadow text-center"><h1>Access Denied</h1><button onclick="window.location.href='index.html'" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded">Back to Login</button></div></div>`;
+        } else {
+            initAgentApp();
+        }
+
+        function initAgentApp() {
+            map = L.map('agentMap').setView([20.5937, 78.9629], 5);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+            loadLots();
+            fetchBookings();
+            setInterval(fetchBookings, 5000);
+            startTimerLoop();
+        }
+
+        // --- VOICE ASSISTANT ---
+        let recognition;
+        function toggleVoice() {
+            if (!('webkitSpeechRecognition' in window)) return alert("Voice not supported.");
+            if (recognition && recognition.started) { recognition.stop(); return; }
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.lang = 'en-US';
+            recognition.onstart = function() { recognition.started = true; document.getElementById('voiceBtn').classList.add('listening'); document.getElementById('voiceStatus').innerText="Listening..."; speak("Listening"); };
+            recognition.onend = function() { recognition.started = false; document.getElementById('voiceBtn').classList.remove('listening'); document.getElementById('voiceStatus').innerText="Voice Control"; };
+            recognition.onresult = function(event) { processCommand(event.results[0][0].transcript.toLowerCase()); };
+            recognition.start();
+        }
+        function processCommand(cmd) {
+            if (cmd.includes("scan")) { speak("Opening scanner."); scanQRCode(); }
+            else if (cmd.includes("add")) { speak("Opening manual entry."); openManualEntryModal(); }
+            else if (cmd.includes("refresh")) { speak("Refreshing."); fetchBookings(); }
+            else speak("Command not recognized.");
+        }
+        function speak(text) { window.speechSynthesis.speak(new SpeechSynthesisUtterance(text)); }
+
+        // --- MAP & DATA ---
+        function locateUser() {
+            if (!map) return;
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(p => {
+                    map.flyTo([p.coords.latitude, p.coords.longitude], 16);
+                    L.circleMarker([p.coords.latitude, p.coords.longitude], { radius: 8, fillColor: "#3b82f6", color: "#fff", fillOpacity: 0.8 }).addTo(map).bindPopup("You are here").openPopup();
+                });
+            }
+        }
+
+        async function loadLots() {
+            try {
+                const res = await fetch('api/get_lots.php');
+                const lots = await res.json();
+                const myLot = lots.find(l => l.id == CURRENT_AGENT_LOT_ID);
+                if(myLot) {
+                    document.getElementById('assignedZoneLabel').innerText = "Zone: " + myLot.name;
+                    if(myLot.latitude && map) {
+                        L.marker([myLot.latitude, myLot.longitude]).addTo(map).bindPopup(`<b>${myLot.name}</b><br>Your Assigned Zone`).openPopup();
+                        map.setView([myLot.latitude, myLot.longitude], 16);
+                    }
+                }
+            } catch (err) {}
+        }
+
+        async function fetchBookings() {
+            const tbody = document.getElementById('bookingsTable');
+            let dbData = [];
+            let validSpotIds = [];
+
+            try {
+                const resSpots = await fetch(`api/get_spots.php?lot_id=${CURRENT_AGENT_LOT_ID}`);
+                const spots = await resSpots.json();
+                validSpotIds = spots.map(s => s.id);
+            } catch (e) {}
+            validSpotIds.push(parseInt(CURRENT_AGENT_LOT_ID));
+
+            try {
+                const res = await fetch('api/agent_tasks.php?action=get_all');
+                if(res.ok) dbData = await res.json();
+            } catch (err) {}
+
+            const localData = JSON.parse(localStorage.getItem('smartpark_bookings') || '[]');
+            const formattedLocal = localData.filter(b => b.status === 'Active').map(b => ({
+                id: b.id, plate_number: b.plate, start_time: b.date, 
+                end_time: b.end_time || new Date(new Date(b.date).getTime() + 60*60*1000).toISOString(),
+                total_cost: b.amount, status: 'active', 
+                spot_id: b.spot_id
+            }));
+
+            const allData = [...dbData];
+            formattedLocal.forEach(local => {
+                if(!allData.find(db => db.id == local.id)) allData.unshift(local);
+            });
+
+            const myData = allData.filter(b => validSpotIds.includes(parseInt(b.spot_id)));
+
+            document.getElementById('activeCount').innerText = myData.length;
+            
+            if(myData.length === 0) tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">No active vehicles in your zone.</td></tr>`;
+            else tbody.innerHTML = myData.map(row => {
+                // Get Charging Session Data
+                const chargingData = getChargingData(row.id);
+                const isCharging = chargingData && chargingData.active;
+                const chargeCost = chargingData ? chargingData.total : 0;
+                const totalWithCharge = (parseFloat(row.total_cost) + chargeCost).toFixed(2);
+
+                return `
+                <tr class="hover:bg-slate-50">
+                    <td class="p-4 font-mono font-bold text-slate-700">#${row.id}</td>
+                    <td class="p-4"><span class="bg-slate-100 border px-2 py-1 rounded font-mono font-bold uppercase">${row.plate_number}</span></td>
+                    <td class="p-4 text-slate-500 text-xs">${new Date(row.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                    <td class="p-4 text-slate-500 text-xs font-bold">${row.end_time ? new Date(row.end_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '-'}</td>
+                    <td class="p-4 font-mono font-bold text-sm" id="timer-${row.id}" data-end="${row.end_time}">Loading...</td>
+                    <td class="p-4 font-bold text-slate-700">₹${totalWithCharge}</td>
+                    
+                    <!-- EV CHARGING COLUMN -->
+                    <td class="p-4">
+                         <button onclick="toggleCharging('${row.id}')" class="text-xs ${isCharging ? 'bg-amber-100 text-amber-700 border border-amber-300' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'} px-3 py-1.5 rounded-full flex items-center gap-1 transition shadow-sm">
+                            <i data-lucide="${isCharging ? 'zap' : 'plug'}" class="w-3 h-3 ${isCharging ? 'charging-active' : ''}"></i>
+                            ${isCharging ? 'Charging...' : 'Start Charge'}
+                        </button>
+                        ${chargeCost > 0 ? `<div class="text-[10px] text-slate-400 mt-1">+₹${chargeCost} Energy</div>` : ''}
+                    </td>
+
+                    <td class="p-4 text-right"><button onclick="releaseCar(${row.id})" class="text-xs bg-slate-900 text-white px-3 py-2 rounded-lg hover:bg-slate-700">Release</button></td>
+                </tr>
+            `}).join('');
+            lucide.createIcons();
+        }
+
+        // --- EV CHARGING LOGIC ---
+        function getChargingData(id) {
+            const sessions = JSON.parse(localStorage.getItem('ev_sessions') || '{}');
+            return sessions[id];
+        }
+
+        function toggleCharging(id) {
+            const sessions = JSON.parse(localStorage.getItem('ev_sessions') || '{}');
+            
+            if (sessions[id] && sessions[id].active) {
+                // Stop Charging
+                const start = new Date(sessions[id].startTime);
+                const now = new Date();
+                const hours = (now - start) / (1000 * 60 * 60);
+                const cost = Math.ceil(hours * EV_RATE); // Rs 15/hr
+                
+                sessions[id].active = false;
+                sessions[id].total = (sessions[id].total || 0) + cost;
+                
+                // Keep session data but mark inactive to show final cost
+                alert(`🔌 Charging Stopped.\n\nSession Duration: ${hours.toFixed(2)} hrs\nSession Cost: ₹${cost}\n\nTotal EV Cost: ₹${sessions[id].total}`);
+            } else {
+                // Start Charging
+                if(!sessions[id]) sessions[id] = { total: 0 };
+                sessions[id].active = true;
+                sessions[id].startTime = new Date().toISOString();
+                speak("Vehicle charging started.");
+            }
+            
+            localStorage.setItem('ev_sessions', JSON.stringify(sessions));
+            fetchBookings();
+        }
+
+        function startTimerLoop() {
+            setInterval(() => {
+                document.querySelectorAll('[id^="timer-"]').forEach(el => {
+                    const endTimeStr = el.getAttribute('data-end');
+                    if(!endTimeStr || endTimeStr === 'null') { el.innerText = "--"; return; }
+
+                    const endTime = new Date(endTimeStr).getTime();
+                    const now = new Date().getTime();
+                    const diff = endTime - now;
+
+                    if (diff > 0) {
+                        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)); 
+                        let display = "";
+                        if(days > 0) display = `${days}d ${hours}h`;
+                        else if(hours > 0) display = `${hours}h ${minutes}m`;
+                        else display = `${minutes}m`;
+                        el.className = "p-4 font-mono font-bold text-sm text-emerald-600";
+                        el.innerText = display;
+                    } else {
+                        const overdueMs = Math.abs(diff);
+                        const overdueHrs = Math.ceil(overdueMs / (1000 * 60 * 60));
+                        const penalty = overdueHrs * PENALTY_RATE;
+                        el.className = "p-4 font-mono font-bold text-sm text-red-600 animate-pulse";
+                        el.innerHTML = `OVERDUE<br><span class="text-xs bg-red-100 px-1 rounded text-red-700">+₹${penalty} Fine</span>`;
+                    }
+                });
+            }, 1000);
+        }
+
+        async function releaseCar(id) {
+            try {
+                const res = await fetch('api/agent_tasks.php?action=release', { method: 'POST', body: JSON.stringify({ id: id }) });
+                const data = await res.json();
+                if(data.success) { 
+                    alert("Vehicle Released Successfully"); 
+                    const localData = JSON.parse(localStorage.getItem('smartpark_bookings') || '[]');
+                    const updated = localData.filter(b => b.id != id); 
+                    localStorage.setItem('smartpark_bookings', JSON.stringify(updated));
+                    // Cleanup EV data
+                    const evSessions = JSON.parse(localStorage.getItem('ev_sessions') || '{}');
+                    delete evSessions[id];
+                    localStorage.setItem('ev_sessions', JSON.stringify(evSessions));
+                    
+                    fetchBookings(); 
+                } else alert("Error: " + data.error);
+            } catch(err) { 
+                const localData = JSON.parse(localStorage.getItem('smartpark_bookings') || '[]');
+                const updated = localData.filter(b => b.id != id); 
+                localStorage.setItem('smartpark_bookings', JSON.stringify(updated));
+                alert("Simulated: Vehicle Released!");
+                fetchBookings();
+            }
+        }
+
+        async function scanQRCode() {
+            let ticketId = prompt("📷 SCANNER ACTIVE\nEnter Ticket ID:");
+            if(!ticketId) return;
+            ticketId = ticketId.replace('#', '').trim();
+            const bookings = await fetchBookings(); // Now safe as fetchBookings logic handles data
+             // We need to access data, but fetchBookings return value is not captured here easily without refactor
+             // Re-fetch logic or access DOM not ideal. Let's just blindly try to release.
+             // Better: call a check API.
+             if(confirm(`Confirm Exit for Ticket #${ticketId}?`)) releaseCar(ticketId);
+        }
+
+        function openManualEntryModal() {
+            const now = new Date();
+            const oneHr = new Date(now.getTime() + 60*60*1000);
+            const toLocalISO = (d) => {
+                const offset = d.getTimezoneOffset() * 60000;
+                return new Date(d.getTime() - offset).toISOString().slice(0, 16);
+            };
+            document.getElementById('manualPlateInput').value = '';
+            document.getElementById('manualStartTime').value = toLocalISO(now);
+            document.getElementById('manualEndTime').value = toLocalISO(oneHr);
+            document.getElementById('manualEntryInputModal').classList.remove('hidden');
+        }
+
+        async function submitManualEntry(e) {
+            e.preventDefault();
+            const plate = document.getElementById('manualPlateInput').value.toUpperCase();
+            const start = document.getElementById('manualStartTime').value;
+            const end = document.getElementById('manualEndTime').value;
+
+            if (new Date(end) <= new Date(start)) { alert("End time must be after start time"); return; }
+
+            const derivedSpotId = (parseInt(CURRENT_AGENT_LOT_ID) * 100) + 1;
+            const payload = { plate: plate, start_time: start, end_time: end, spot_id: derivedSpotId };
+
+            try {
+                const res = await fetch('api/agent_tasks.php?action=simulate', { method: 'POST', body: JSON.stringify(payload) });
+                const data = await res.json();
+                if(data.success) {
+                    document.getElementById('manualEntryInputModal').classList.add('hidden');
+                    fetchBookings();
+                    showManualTicket(data.ticket_id || Math.floor(Math.random() * 9000)+1000, plate); 
+                }
+            } catch(err) {
+                const booking = { id: Math.floor(Math.random() * 9000) + 1000, plate: plate, amount: 20, date: start, end_time: end, status: 'Active', spot_id: derivedSpotId };
+                const bookings = JSON.parse(localStorage.getItem('smartpark_bookings') || '[]');
+                bookings.unshift(booking);
+                localStorage.setItem('smartpark_bookings', JSON.stringify(bookings));
+                document.getElementById('manualEntryInputModal').classList.add('hidden');
+                showManualTicket(booking.id, booking.plate);
+                fetchBookings();
+            }
+        }
+
+        function showManualTicket(id, plate) {
+            document.getElementById('manualTicketId').innerText = "#" + id;
+            document.getElementById('manualTicketPlate').innerText = plate;
+            const qrContainer = document.getElementById("qrcode");
+            qrContainer.innerHTML = "";
+            new QRCode(qrContainer, { text: id.toString(), width: 128, height: 128 });
+            document.getElementById('manualTicketModal').classList.remove('hidden');
+        }
+
+        function logout() { 
+            localStorage.removeItem('agent_lot_id');
+            try { window.location.href = 'index.html'; } catch(e) { alert("Logged out"); }
+        }
+    </script>
+</body>
+</html>

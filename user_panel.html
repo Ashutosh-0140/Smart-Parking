@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Find Parking - AutoSpace</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚗</text></svg>">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        .leaflet-pane { z-index: 0 !important; }
+        .leaflet-control { z-index: 10 !important; }
+    </style>
+</head>
+<body class="bg-slate-50 flex h-screen overflow-hidden font-sans">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white border-r border-slate-200 hidden md:flex flex-col">
+        <div class="p-6 flex items-center gap-2">
+            <div class="bg-blue-600 p-2 rounded-lg">
+                <i data-lucide="car" class="text-white w-5 h-5"></i>
+            </div>
+            <span class="text-xl font-bold text-slate-800">AutoSpace</span>
+        </div>
+
+        <nav class="flex-1 px-4 space-y-2 mt-4">
+            <button onclick="switchView('parking')" id="btn-parking" class="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 rounded-xl font-medium transition-colors">
+                <i data-lucide="map-pin" class="w-5 h-5"></i> Find Parking
+            </button>
+            <button onclick="switchView('bookings')" id="btn-bookings" class="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-50 hover:text-slate-800 rounded-xl transition-colors">
+                <i data-lucide="ticket" class="w-5 h-5"></i> My Bookings
+            </button>
+            <button onclick="switchView('garage')" id="btn-garage" class="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-50 hover:text-slate-800 rounded-xl transition-colors">
+                <i data-lucide="car-front" class="w-5 h-5"></i> My Garage
+            </button>
+            <button onclick="switchView('payments')" id="btn-payments" class="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-50 hover:text-slate-800 rounded-xl transition-colors">
+                <i data-lucide="credit-card" class="w-5 h-5"></i> Payments
+            </button>
+        </nav>
+
+        <div class="p-4 border-t">
+            <button onclick="window.location.href='index.html'" class="flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 rounded-xl w-full transition">
+                <i data-lucide="log-out" class="w-5 h-5"></i> Logout
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-y-auto relative bg-slate-50">
+        
+        <!-- VIEW 1: FIND PARKING -->
+        <div id="view-parking" class="view-section">
+            <header class="bg-white/80 backdrop-blur-md sticky top-0 z-20 border-b border-slate-200 px-8 py-4 flex justify-between items-center">
+                <h1 class="text-2xl font-bold text-slate-800">Available Parking Lots</h1>
+                <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold">U</div>
+            </header>
+            <div class="p-8">
+                <div id="userMap" class="h-80 w-full rounded-2xl shadow-sm border border-slate-200 mb-8 z-0"></div>
+                <h2 class="text-lg font-bold text-slate-700 mb-4">Nearby Locations</h2>
+                <div id="lots-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div class="col-span-full text-center py-20 text-slate-400 animate-pulse">Loading parking data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW 2: MY BOOKINGS -->
+        <div id="view-bookings" class="view-section hidden">
+            <header class="bg-white/80 backdrop-blur-md sticky top-0 z-20 border-b border-slate-200 px-8 py-4"><h1 class="text-2xl font-bold text-slate-800">My Bookings</h1></header>
+            <div class="p-8" id="bookings-list"><div class="text-center py-10 text-slate-400">Loading history...</div></div>
+        </div>
+
+        <!-- VIEW 3: MY GARAGE (NEW) -->
+        <div id="view-garage" class="view-section hidden">
+            <header class="bg-white/80 backdrop-blur-md sticky top-0 z-20 border-b border-slate-200 px-8 py-4 flex justify-between items-center">
+                <h1 class="text-2xl font-bold text-slate-800">My Garage</h1>
+                <button onclick="document.getElementById('addVehicleModal').classList.remove('hidden')" class="bg-slate-900 text-white text-sm font-bold px-4 py-2 rounded-lg hover:bg-slate-800 flex items-center gap-2">
+                    <i data-lucide="plus"></i> Add Vehicle
+                </button>
+            </header>
+            <div class="p-8">
+                <div id="garage-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Vehicles injected here -->
+                    <div class="col-span-full text-center py-10 text-slate-400">No vehicles saved. Add one for faster booking!</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW 4: PAYMENTS -->
+        <div id="view-payments" class="view-section hidden">
+            <header class="bg-white/80 backdrop-blur-md sticky top-0 z-20 border-b border-slate-200 px-8 py-4"><h1 class="text-2xl font-bold text-slate-800">Payment History</h1></header>
+            <div class="p-8">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                <th class="p-4 text-xs font-bold text-slate-500 uppercase">Date</th>
+                                <th class="p-4 text-xs font-bold text-slate-500 uppercase">Description</th>
+                                <th class="p-4 text-xs font-bold text-slate-500 uppercase">Duration</th>
+                                <th class="p-4 text-xs font-bold text-slate-500 uppercase text-right">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody id="payments-list" class="divide-y divide-slate-100 text-sm"><tr><td colspan="4" class="p-8 text-center text-slate-400">Loading payments...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Add Vehicle Modal -->
+    <div id="addVehicleModal" class="fixed inset-0 bg-black/50 hidden z-[2000] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <h3 class="text-xl font-bold text-slate-800 mb-4">Add Vehicle</h3>
+            <form id="addVehicleForm" class="space-y-4">
+                <input type="text" id="vehName" placeholder="Vehicle Nickname (e.g. My Car)" class="w-full p-2 border rounded-lg" required>
+                <input type="text" id="vehPlate" placeholder="Plate Number (e.g. OD-02-AA-1234)" class="w-full p-2 border rounded-lg uppercase" required>
+                <select id="vehType" class="w-full p-2 border rounded-lg bg-white">
+                    <option value="4">4-Wheeler (Car/Jeep)</option>
+                    <option value="2">2-Wheeler (Bike/Scooty)</option>
+                </select>
+                <div class="flex gap-3">
+                    <button type="button" onclick="document.getElementById('addVehicleModal').classList.add('hidden')" class="flex-1 py-2 text-slate-500 hover:bg-slate-50 rounded-lg">Cancel</button>
+                    <button type="submit" class="flex-1 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-700">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Booking Modal -->
+    <div id="spotModal" class="fixed inset-0 bg-black/50 hidden z-[2000] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl transform transition-all">
+            <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <h3 class="text-xl font-bold text-slate-800" id="modalTitle">Select a Spot</h3>
+                <button onclick="closeModal()" class="p-2 hover:bg-slate-200 rounded-full transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="p-8 bg-slate-100">
+                <div id="spots-grid" class="grid grid-cols-4 gap-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Modal (With Saved Vehicle Selection) -->
+    <div id="paymentModal" class="fixed inset-0 bg-black/60 hidden z-[2050] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-slate-800">Booking Details</h3>
+                <button onclick="closePaymentModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <form id="paymentForm" onsubmit="processPayment(event)" class="space-y-4">
+                
+                <!-- Saved Vehicle Dropdown -->
+                <div class="bg-indigo-50 border border-indigo-100 p-3 rounded-xl mb-2">
+                    <label class="block text-xs font-bold text-indigo-600 uppercase mb-1">Select from Garage</label>
+                    <select id="savedVehicleSelect" onchange="applySavedVehicle()" class="w-full p-2 border border-indigo-200 rounded-lg text-sm bg-white outline-none">
+                        <option value="">-- Choose Saved Vehicle --</option>
+                        <!-- Options injected by JS -->
+                    </select>
+                </div>
+
+                <div class="bg-slate-50 p-4 rounded-xl space-y-3 border border-slate-100">
+                     <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">From</label>
+                            <input type="datetime-local" id="startTime" required onchange="calculateTotal()" class="w-full p-2 border border-slate-200 rounded-lg outline-none text-xs bg-white">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">To</label>
+                            <input type="datetime-local" id="endTime" required onchange="calculateTotal()" class="w-full p-2 border border-slate-200 rounded-lg outline-none text-xs bg-white">
+                        </div>
+                     </div>
+
+                     <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Vehicle Plate</label>
+                        <input type="text" id="plateInput" placeholder="OD-02-AA-1234" required class="w-full p-2 border border-slate-200 rounded-lg outline-none uppercase text-sm bg-white">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Vehicle Type</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="cursor-pointer">
+                                <input type="radio" name="vehicleType" value="2" class="peer sr-only" onchange="calculateTotal()" checked>
+                                <div class="p-2 border border-slate-200 rounded-lg text-center peer-checked:bg-blue-600 peer-checked:text-white transition text-sm font-medium">2-Wheeler</div>
+                            </label>
+                            <label class="cursor-pointer">
+                                <input type="radio" name="vehicleType" value="4" class="peer sr-only" onchange="calculateTotal()">
+                                <div class="p-2 border border-slate-200 rounded-lg text-center peer-checked:bg-blue-600 peer-checked:text-white transition text-sm font-medium">4-Wheeler</div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-blue-50 p-4 rounded-xl flex items-center justify-between border border-blue-100">
+                    <div>
+                        <p class="text-xs text-blue-600 font-bold uppercase">Total Payable</p>
+                        <p class="text-3xl font-bold text-slate-900" id="displayPrice">₹20.00</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-xs text-slate-500 font-bold uppercase">Duration</p>
+                        <p class="text-sm font-bold text-slate-700" id="displayDuration">1 Hr</p>
+                    </div>
+                </div>
+                <button type="submit" id="payBtn" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 rounded-xl transition-all shadow-lg mt-2">Confirm & Pay</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Ticket Modal -->
+    <div id="ticketModal" class="fixed inset-0 bg-black/80 hidden z-[3000] flex items-center justify-center backdrop-blur-md">
+        <div class="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl relative">
+            <div class="bg-emerald-500 p-6 text-center text-white relative">
+                <i data-lucide="check-circle" class="w-12 h-12 mx-auto mb-2"></i>
+                <h2 class="text-2xl font-bold">Booking Confirmed!</h2>
+            </div>
+            <div class="p-8 flex flex-col items-center">
+                <div id="qrcode" class="p-4 bg-white border-4 border-slate-100 rounded-xl shadow-inner mb-6"></div>
+                <div class="text-center space-y-1 mb-6">
+                    <p class="text-xs text-slate-400 uppercase tracking-widest">Ticket Number</p>
+                    <p class="text-3xl font-mono font-bold text-slate-800" id="ticketIdDisplay">#0000</p>
+                </div>
+                <button onclick="document.getElementById('ticketModal').classList.add('hidden')" class="w-full text-slate-400 font-medium py-2 hover:text-slate-600 transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        lucide.createIcons();
+        let pendingBooking = null;
+        let map;
+        const PRICES = { '2': 20, '4': 50 }; // Rate per HOUR
+        let myVehicles = []; // Store fetched vehicles
+
+        function switchView(viewName) {
+            document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`view-${viewName}`).classList.remove('hidden');
+            
+            const views = ['parking', 'bookings', 'payments', 'garage'];
+            views.forEach(v => {
+                const btn = document.getElementById(`btn-${v}`);
+                if (v === viewName) {
+                    btn.className = "w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 rounded-xl font-medium transition-colors";
+                } else {
+                    btn.className = "w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-50 hover:text-slate-800 rounded-xl transition-colors";
+                }
+            });
+
+            if(viewName === 'parking' && map) setTimeout(() => map.invalidateSize(), 100);
+            if(viewName === 'bookings') loadMyBookings();
+            if(viewName === 'payments') loadPayments();
+            if(viewName === 'garage') loadGarage();
+        }
+
+        // --- NEW: GARAGE LOGIC ---
+        async function loadGarage() {
+            const container = document.getElementById('garage-list');
+            const bookingSelect = document.getElementById('savedVehicleSelect');
+            
+            try {
+                const res = await fetch('api/vehicle.php?action=get');
+                const vehicles = await res.json();
+                myVehicles = vehicles; // Cache for booking modal
+
+                // Populate Modal Dropdown
+                bookingSelect.innerHTML = `<option value="">-- Choose Saved Vehicle --</option>` + 
+                    vehicles.map(v => `<option value="${v.id}">${v.vehicle_name} (${v.plate_number})</option>`).join('');
+
+                if (vehicles.length === 0) {
+                    container.innerHTML = `<div class="col-span-full text-center py-10 text-slate-400">No vehicles saved. Add one for faster booking!</div>`;
+                } else {
+                    container.innerHTML = vehicles.map(v => `
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex justify-between items-center group">
+                            <div class="flex items-center gap-4">
+                                <div class="bg-indigo-100 p-3 rounded-full text-indigo-600">
+                                    <i data-lucide="${v.vehicle_type === '2' ? 'bike' : 'car'}" class="w-6 h-6"></i>
+                                </div>
+                                <div>
+                                    <h4 class="font-bold text-lg text-slate-800">${v.vehicle_name}</h4>
+                                    <p class="font-mono text-sm text-slate-500 uppercase">${v.plate_number}</p>
+                                </div>
+                            </div>
+                            <button onclick="deleteVehicle(${v.id})" class="text-red-400 hover:text-red-600 p-2 opacity-0 group-hover:opacity-100 transition">
+                                <i data-lucide="trash-2" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                    `).join('');
+                    lucide.createIcons();
+                }
+            } catch (err) { container.innerHTML = "Error loading vehicles"; }
+        }
+
+        document.getElementById('addVehicleForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const data = {
+                name: document.getElementById('vehName').value,
+                plate: document.getElementById('vehPlate').value.toUpperCase(),
+                type: document.getElementById('vehType').value
+            };
+            try {
+                const res = await fetch('api/vehicle.php?action=add', { method: 'POST', body: JSON.stringify(data) });
+                if(res.ok) {
+                    document.getElementById('addVehicleForm').reset();
+                    document.getElementById('addVehicleModal').classList.add('hidden');
+                    loadGarage();
+                    alert("Vehicle Saved!");
+                }
+            } catch(e) { alert("Error adding vehicle"); }
+        });
+
+        async function deleteVehicle(id) {
+            if(!confirm("Remove vehicle?")) return;
+            try {
+                const res = await fetch('api/vehicle.php?action=delete', { method: 'POST', body: JSON.stringify({id}) });
+                if(res.ok) loadGarage();
+            } catch(e) {}
+        }
+
+        // --- NEW: AUTO-FILL BOOKING FORM ---
+        function applySavedVehicle() {
+            const id = document.getElementById('savedVehicleSelect').value;
+            const vehicle = myVehicles.find(v => v.id == id);
+            
+            if(vehicle) {
+                document.getElementById('plateInput').value = vehicle.plate_number;
+                // Select proper radio button
+                const radios = document.getElementsByName('vehicleType');
+                for(let r of radios) {
+                    if(r.value === vehicle.vehicle_type) r.checked = true;
+                }
+                calculateTotal(); // Update price
+            }
+        }
+
+        // ... [Rest of existing Map, Booking, Payment functions from previous version] ...
+        async function loadMyBookings() {
+            const container = document.getElementById('bookings-list');
+            try {
+                const res = await fetch('api/get_user_bookings.php');
+                const bookings = await res.json();
+                renderBookingsList(bookings);
+            } catch (err) {
+                const bookings = JSON.parse(localStorage.getItem('smartpark_bookings') || '[]');
+                renderBookingsList(bookings);
+            }
+        }
+
+        function renderBookingsList(bookings) {
+            const container = document.getElementById('bookings-list');
+            const activeBookings = bookings.filter(b => b.status === 'Active' || b.status === 'active');
+
+            if (activeBookings.length === 0) {
+                container.innerHTML = `<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 text-center"><div class="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="ticket" class="w-8 h-8 text-slate-400"></i></div><h3 class="text-lg font-bold text-slate-700">No Active Bookings</h3><button onclick="switchView('parking')" class="bg-blue-600 mt-4 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 transition">Find a Spot</button></div>`;
+            } else {
+                container.innerHTML = `<div class="space-y-4">` + activeBookings.map(b => `
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div class="flex items-center gap-4">
+                            <div class="bg-blue-100 p-3 rounded-full text-blue-600"><i data-lucide="ticket" class="w-6 h-6"></i></div>
+                            <div>
+                                <h4 class="font-bold text-lg text-slate-800">Slot ${b.spotName || b.id}</h4>
+                                <p class="text-sm text-slate-500">${b.lotName || 'Smart Lot'}</p>
+                                <p class="text-xs text-slate-400 mt-1">Plate: ${b.plate} • ${b.date}</p>
+                            </div>
+                        </div>
+                        <div class="text-right flex flex-col items-end gap-2">
+                            <span class="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold uppercase">Active</span>
+                            <div class="flex gap-2">
+                                <button onclick="showTicket('${b.id}', 'Entry')" class="bg-slate-100 text-slate-700 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-1 transition"><i data-lucide="qr-code" class="w-3 h-3"></i> View QR</button>
+                                <button onclick="showTicket('${b.id}', 'Exit')" class="bg-red-50 text-red-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-red-100 flex items-center gap-1 transition"><i data-lucide="log-out" class="w-3 h-3"></i> Request Exit</button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('') + `</div>`;
+                lucide.createIcons();
+            }
+        }
+
+        async function loadPayments() {
+            const container = document.getElementById('payments-list');
+            try {
+                const res = await fetch('api/get_user_bookings.php');
+                const bookings = await res.json();
+                renderPaymentsList(bookings);
+            } catch (err) {
+                const bookings = JSON.parse(localStorage.getItem('smartpark_bookings') || '[]');
+                renderPaymentsList(bookings);
+            }
+        }
+
+        function renderPaymentsList(bookings) {
+            const container = document.getElementById('payments-list');
+            if (bookings.length === 0) {
+                container.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400">No transaction history.</td></tr>`;
+            } else {
+                container.innerHTML = bookings.map(b => `
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="p-4 text-slate-500">${b.date}</td>
+                        <td class="p-4 font-bold text-slate-700">Parking Fee - Slot ${b.spotName || b.id} <span class="text-xs font-normal text-slate-400">(${b.status})</span></td>
+                        <td class="p-4 text-slate-500">${b.duration || '1 Hr'}</td>
+                        <td class="p-4 font-bold text-emerald-600 text-right">- ₹${b.amount}</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        async function initMap() {
+            map = L.map('userMap').setView([20.2961, 85.8245], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(p => {
+                    map.setView([p.coords.latitude, p.coords.longitude], 14);
+                    L.marker([p.coords.latitude, p.coords.longitude]).addTo(map).bindPopup("You are here");
+                });
+            }
+        }
+
+        async function fetchLots() {
+            const container = document.getElementById('lots-container');
+            try {
+                const response = await fetch('api/get_lots.php');
+                let lots = await response.json();
+                if (!lots || lots.length === 0) throw new Error("No data");
+                lots.forEach(lot => {
+                    if(lot.latitude) L.marker([lot.latitude, lot.longitude]).addTo(map).bindPopup(`<b>${lot.name}</b><br><button onclick="openSpots(${lot.id}, '${lot.name}')" class="mt-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">Book Now</button>`);
+                });
+                container.innerHTML = lots.map(lot => `
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200 hover:shadow-lg transition cursor-pointer" onclick="openSpots(${lot.id}, '${lot.name}')">
+                        <h3 class="text-lg font-bold text-slate-800">${lot.name}</h3>
+                        <span class="text-blue-600 font-bold">From ₹${lot.price || 20}/hr</span>
+                    </div>
+                `).join('');
+            } catch (err) { container.innerHTML = `<div class="text-red-500">System offline.</div>`; }
+        }
+
+        async function openSpots(lotId, name) {
+            document.getElementById('spotModal').classList.remove('hidden');
+            const grid = document.getElementById('spots-grid');
+            grid.innerHTML = 'Loading...';
+            try {
+                const res = await fetch(`api/get_spots.php?lot_id=${lotId}`);
+                const spots = await res.json();
+                grid.innerHTML = spots.map(spot => `
+                    <button onclick="initiateBooking(${spot.id}, '${spot.name}', '${name}')" class="h-20 rounded-xl border-2 flex flex-col items-center justify-center ${spot.status === 'occupied' ? 'bg-slate-100 opacity-50' : 'bg-white border-emerald-400 hover:bg-emerald-50'}" ${spot.status === 'occupied' ? 'disabled' : ''}>
+                        <span class="font-bold text-slate-700">${spot.name}</span>
+                        ${spot.status === 'occupied' ? '<i data-lucide="car" class="w-4 h-4 mt-1"></i>' : '<span class="text-xs text-emerald-600">Free</span>'}
+                    </button>
+                `).join('');
+                lucide.createIcons();
+            } catch(e) { grid.innerHTML = "Error loading spots"; }
+        }
+
+        function initiateBooking(spotId, spotName, lotName) {
+            pendingBooking = { spotId, spotName, lotName };
+            document.getElementById('plateInput').value = '';
+            
+            const now = new Date();
+            const oneHourLater = new Date(now.getTime() + 60*60*1000);
+            const formatDT = (d) => d.toISOString().slice(0, 16);
+            document.getElementById('startTime').value = formatDT(now);
+            document.getElementById('endTime').value = formatDT(oneHourLater);
+            
+            calculateTotal();
+            loadGarage(); // Load saved vehicles into dropdown
+            document.getElementById('paymentModal').classList.remove('hidden');
+        }
+
+        function calculateTotal() {
+            const start = new Date(document.getElementById('startTime').value);
+            const end = new Date(document.getElementById('endTime').value);
+            const type = document.querySelector('input[name="vehicleType"]:checked').value;
+            const rate = PRICES[type];
+            if (end <= start) {
+                document.getElementById('displayPrice').innerText = "₹0.00";
+                document.getElementById('displayDuration').innerText = "Invalid Time";
+                return;
+            }
+            const diffMs = end - start;
+            const diffHrs = Math.ceil(diffMs / (1000 * 60 * 60));
+            const diffDays = Math.floor(diffHrs / 24);
+            const remHrs = diffHrs % 24;
+            let durationStr = diffHrs + " Hrs";
+            if(diffDays > 0) durationStr = `${diffDays} Days, ${remHrs} Hrs`;
+            const total = diffHrs * rate;
+            document.getElementById('displayPrice').innerText = `₹${total}.00`;
+            document.getElementById('displayDuration').innerText = durationStr;
+        }
+
+        function closePaymentModal() { document.getElementById('paymentModal').classList.add('hidden'); }
+        function closeModal() { document.getElementById('spotModal').classList.add('hidden'); }
+
+        async function processPayment(e) {
+            e.preventDefault();
+            const plate = document.getElementById('plateInput').value.toUpperCase();
+            if(!plate) return alert("Enter plate");
+            
+            const start = document.getElementById('startTime').value;
+            const end = document.getElementById('endTime').value;
+            const priceText = document.getElementById('displayPrice').innerText.replace('₹', '');
+            const amount = parseFloat(priceText);
+            const btn = document.getElementById('payBtn');
+            btn.innerHTML = "Processing...";
+            await new Promise(r => setTimeout(r, 1500)); 
+
+            try {
+                const res = await fetch('api/book_spot.php', {
+                    method: 'POST',
+                    body: JSON.stringify({ spot_id: pendingBooking.spotId, plate: plate, amount: amount, start_time: start, end_time: end })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    closePaymentModal();
+                    closeModal();
+                    showTicket(data.ticket_id, 'Entry');
+                } else throw new Error(data.error);
+            } catch(err) {
+                // Fallback
+                const booking = { id: Math.floor(Math.random() * 9000) + 1000, spotName: pendingBooking.spotName, lotName: pendingBooking.lotName, plate: plate, amount: amount, date: new Date().toLocaleString(), status: 'Active' };
+                const bookings = JSON.parse(localStorage.getItem('smartpark_bookings') || '[]');
+                bookings.unshift(booking);
+                localStorage.setItem('smartpark_bookings', JSON.stringify(bookings));
+                closePaymentModal();
+                closeModal();
+                showTicket(booking.id, 'Entry');
+            } finally { btn.innerHTML = "Confirm & Pay"; }
+        }
+
+        function showTicket(ticketId, type) {
+            const modal = document.getElementById('ticketModal');
+            document.getElementById('ticketIdDisplay').innerText = "#" + ticketId;
+            document.getElementById('ticketTitle').innerText = type === 'Exit' ? 'Exit Pass' : 'Booking Confirmed';
+            document.getElementById('ticketSubtitle').innerText = type === 'Exit' ? 'Show this QR to Exit' : 'Show to Agent for Entry';
+            const qrContainer = document.getElementById("qrcode");
+            qrContainer.innerHTML = "";
+            new QRCode(qrContainer, { text: ticketId.toString(), width: 128, height: 128 });
+            modal.classList.remove('hidden');
+        }
+
+        function sendEmailTicket() {
+            const id = document.getElementById('ticketIdDisplay').innerText;
+            alert(`✅ Ticket ${id} sent successfully to your registered email!`);
+        }
+
+        initMap();
+        fetchLots();
+        // Pre-load garage on start (silently) so it's ready
+        fetch('api/vehicle.php?action=get').then(r=>r.json()).then(v=>myVehicles=v).catch(e=>{});
+    </script>
+</body>
+</html>
